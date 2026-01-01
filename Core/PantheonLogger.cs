@@ -43,6 +43,10 @@ namespace ReplayLogger
         private BufferedLogSection InvWarn;
         private BufferedLogSection speedWarnBuffer;
         private BufferedLogSection hitWarnBuffer;
+        private readonly List<string> keyLogBuffer = new();
+        private const int KeyLogFlushIntervalMs = 200;
+        private const int KeyLogFlushBatchSize = 50;
+        private long lastKeyLogFlushTime;
 
         private readonly SpeedWarnTracker speedWarnTracker = new();
         private readonly HitWarnTracker hitWarnTracker = new();
@@ -441,6 +445,8 @@ namespace ReplayLogger
                         debugModEventsTracker.Reset(initialDebugUiVisible);
                         debugMenuTracker.Reset(initialDebugUiVisible);
                         debugHotkeysTracker.InitializeBindings();
+                        keyLogBuffer.Clear();
+                        lastKeyLogFlushTime = 0;
                         charmsChangeTracker.Reset();
                         CoreSessionLogger.WriteEncryptedModSnapshot(writer, modsDir, "---------------------------------------------------");
                         LogWrite.EncryptedLine(writer, CoreSessionLogger.BuildEquippedCharmsLine());
@@ -477,7 +483,6 @@ namespace ReplayLogger
 
                         LogWrite.EncryptedLine(writer, $"{dataTime}|{lastUnixTime}|{curentPlayTime}|{self.TargetSceneName}|");
                     }
-                    writer?.Flush();
 
 
 
@@ -523,7 +528,6 @@ namespace ReplayLogger
                     DamageAnfInv.Add($"{dataTime}|{lastUnixTime}|{self.TargetSceneName}{((!skipScenes.Contains(self.TargetSceneName)) ? $"| {bossCounter}*" : "")}");
 
                     LogWrite.EncryptedLine(writer, $"{dataTime}|{lastUnixTime}|{self.TargetSceneName}|{{sprite}}{self.TargetSceneName}{((!skipScenes.Contains(self.TargetSceneName)) ? $"| {bossCounter}*" : "")}");
-                    writer?.Flush();
 
                 }
             }
@@ -578,6 +582,7 @@ namespace ReplayLogger
                 {
                     long EndTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                     string sessionTime = ConvertUnixTimeToTimeString((long)(Time.realtimeSinceStartup * 1000f));
+                    FlushKeyLogBufferIfNeeded(EndTime, force: true);
                     LogWrite.EncryptedLine(writer, $"StartTime: {ConvertUnixTimeToDateTimeString(startUnixTime)}, EndTime: {ConvertUnixTimeToDateTimeString(EndTime)}, TimeInPlay: {ConvertUnixTimeToTimeString(EndTime - startUnixTime)}, SessionTime: {sessionTime}");
 
                     CoreSessionLogger.WriteDamageInvSection(writer, DamageAnfInv, separatorAfter: null);
@@ -677,6 +682,8 @@ namespace ReplayLogger
                 godhomeQolTracker.Reset();
                 debugHotkeysTracker.Reset();
                 debugMenuTracker.Reset();
+                keyLogBuffer.Clear();
+                lastKeyLogFlushTime = 0;
                 DisposeDebugModHooks();
             }
         }

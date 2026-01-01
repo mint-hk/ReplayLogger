@@ -64,6 +64,10 @@ namespace ReplayLogger
         private static BufferedLogSection invWarnings;
         private static BufferedLogSection speedWarnBuffer;
         private static BufferedLogSection hitWarnBuffer;
+        private static readonly List<string> keyLogBuffer = new();
+        private const int KeyLogFlushIntervalMs = 200;
+        private const int KeyLogFlushBatchSize = 50;
+        private static long lastKeyLogFlushTime;
         private static List<string> debugModEvents = new();
         private static List<string> debugHotkeyBindings = new();
         private static List<string> debugHotkeyEvents = new();
@@ -204,8 +208,8 @@ namespace ReplayLogger
 
                     try
                     {
+                        FlushKeyLogBufferIfNeeded(unixTime, force: true);
                         LogWrite.EncryptedLine(writer, startLine);
-                        writer.Flush();
                     }
                     catch (Exception e)
                     {
@@ -219,8 +223,7 @@ namespace ReplayLogger
                 string logEntry = $"+{delta}|{formattedKey}|{keyStatus}|{watermarkNumber}|#{watermarkColor}|{fps.ToString("F0")}|";
                 try
                 {
-                    LogWrite.EncryptedLine(writer, logEntry);
-                    writer.Flush();
+                    keyLogBuffer.Add(logEntry);
                 }
                 catch (Exception e)
                 {
@@ -236,6 +239,8 @@ namespace ReplayLogger
                     }
                 }
             }
+
+            FlushKeyLogBufferIfNeeded(DateTimeOffset.Now.ToUnixTimeMilliseconds());
         }
 
         private static void BossSceneController_Update(On.BossSceneController.orig_Update orig, BossSceneController self)
@@ -639,7 +644,6 @@ namespace ReplayLogger
                     try
                     {
                         LogWrite.EncryptedLine(writer, separator);
-                        writer.Flush();
                     }
                     catch (Exception e)
                     {
@@ -713,6 +717,8 @@ namespace ReplayLogger
                     debugModEvents = new();
                     debugHotkeyBindings = new();
                     debugHotkeyEvents = new();
+                    keyLogBuffer.Clear();
+                    lastKeyLogFlushTime = 0;
                     damageChangeTracker.Reset();
                     flukenestTracker.Reset();
                     infoBoss = new();
@@ -732,7 +738,6 @@ namespace ReplayLogger
 
                     damageAndInv.Add($"{timestamp}|{lastUnixTime}|{arenaName}| {bossCounter}*");
                     LogWrite.EncryptedLine(writer, $"{timestamp}|{lastUnixTime}|{currentPlayTime}|{arenaName}| {bossCounter}*");
-                    writer.Flush();
 
                     speedWarnTracker.Reset(Mathf.Max(Time.timeScale, 0f));
                     InitializeDebugModHooks();
@@ -789,6 +794,7 @@ namespace ReplayLogger
 
             long endUnixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             string sessionTime = ReplayLogger.ConvertUnixTimeToTimeString((long)(Time.realtimeSinceStartup * 1000f));
+            FlushKeyLogBufferIfNeeded(endUnixTime, force: true);
 
             LogWrite.EncryptedLine(writer, $"StartTime: {ReplayLogger.ConvertUnixTimeToDateTimeString(startUnixTime)}, EndTime: {ReplayLogger.ConvertUnixTimeToDateTimeString(endUnixTime)}, TimeInPlay: {ReplayLogger.ConvertUnixTimeToTimeString(endUnixTime - startUnixTime)}, SessionTime: {sessionTime}");
             CoreSessionLogger.WriteDamageInvSection(writer, damageAndInv, separatorAfter: null);
@@ -869,6 +875,8 @@ namespace ReplayLogger
             debugModEvents = new();
             debugHotkeyBindings = new();
             debugHotkeyEvents = new();
+            keyLogBuffer.Clear();
+            lastKeyLogFlushTime = 0;
             debugHotkeysTracker.Reset();
             debugMenuTracker.Reset();
             godhomeQolTracker.Reset();
@@ -1491,6 +1499,30 @@ namespace ReplayLogger
             clearAction?.Invoke();
         }
 
+        private static void FlushKeyLogBufferIfNeeded(long now, bool force = false)
+        {
+            if (writer == null || keyLogBuffer.Count == 0)
+            {
+                return;
+            }
+
+            if (!force)
+            {
+                if (now - lastKeyLogFlushTime < KeyLogFlushIntervalMs && keyLogBuffer.Count < KeyLogFlushBatchSize)
+                {
+                    return;
+                }
+            }
+
+            foreach (string entry in keyLogBuffer)
+            {
+                LogWrite.EncryptedLine(writer, entry);
+            }
+
+            keyLogBuffer.Clear();
+            lastKeyLogFlushTime = now;
+        }
+
         private static void LogDebugHotkeyActivation(string actionName, KeyCode keyCode, long unixTime)
         {
             if (writer == null)
@@ -1501,7 +1533,6 @@ namespace ReplayLogger
             long delta = unixTime - lastUnixTime;
             string entry = $"DebugHotkey|+{delta}|{actionName}|{keyCode}";
             LogWrite.EncryptedLine(writer, entry);
-            writer.Flush();
 
             string arenaName = activeArena ?? "UnknownArena";
             debugHotkeyEvents.Add($"  |{arenaName}|+{delta}|{actionName} ({keyCode})");

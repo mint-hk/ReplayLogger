@@ -105,7 +105,6 @@ namespace ReplayLogger
             if (writer != null)
             {
                 LogWrite.EncryptedLine(writer, entry);
-                writer.Flush();
             }
         }
 

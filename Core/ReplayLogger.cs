@@ -54,7 +54,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static string BuildEquippedCharmsLine()
@@ -168,7 +167,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteDamageInvSection(StreamWriter writer, IEnumerable<string> logs, string separatorAfter = "---------------------------------------------------")
@@ -193,7 +191,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteDamageInvSection(StreamWriter writer, BufferedLogSection logs, string separatorAfter = "---------------------------------------------------")
@@ -211,7 +208,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteSeparator(StreamWriter writer, string separator = "---------------------------------------------------")
@@ -222,7 +218,6 @@ namespace ReplayLogger
             }
 
             LogWrite.EncryptedLine(writer, separator);
-            writer.Flush();
         }
 
         public static void WriteNoBlurSettings(StreamWriter writer, string separator = "---------------------------------------------------")
@@ -582,7 +577,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteWarningsSection(StreamWriter writer, BufferedLogSection warnings, string separatorAfter = "---------------------------------------------------")
@@ -600,7 +594,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteSpeedWarningsSection(StreamWriter writer, IEnumerable<string> warnings, string separatorAfter = "---------------------------------------------------")
@@ -624,7 +617,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void WriteSpeedWarningsSection(StreamWriter writer, BufferedLogSection warnings, string separatorAfter = "---------------------------------------------------")
@@ -642,7 +634,6 @@ namespace ReplayLogger
                 LogWrite.EncryptedLine(writer, separatorAfter);
             }
 
-            writer.Flush();
         }
 
         public static void AddSpeedWarning(List<string> buffer, string arenaName, long deltaMs, float defaultScale, float currentScale, double durationSeconds)
@@ -763,7 +754,6 @@ namespace ReplayLogger
             string label = initial ? "GameSpeedStart" : "GameSpeedChange";
             string entry = $"{label}|+{unixTime - lastUnixTime}|{(scale * 100f):F0}% ({scale:F3})";
             LogWrite.EncryptedLine(writer, entry);
-            writer.Flush();
         }
 
         private void LogSpeedWarning(StreamWriter writer, string arenaName, long lastUnixTime, float currentScale, long now)
@@ -776,7 +766,6 @@ namespace ReplayLogger
             double durationSeconds = (now - speedDeviationStartUnix) / 1000.0;
             string entry = $"SpeedWarn|+{now - lastUnixTime}|Default {(defaultTimeScale * 100f):F0}% ({defaultTimeScale:F3}) -> {(currentScale * 100f):F0}% ({currentScale:F3})|Duration {durationSeconds.ToString("F2", CultureInfo.InvariantCulture)}s";
             LogWrite.EncryptedLine(writer, entry);
-            writer.Flush();
 
             CoreSessionLogger.AddSpeedWarning(warnings, arenaName, now - lastUnixTime, defaultTimeScale, currentScale, durationSeconds);
         }
@@ -877,7 +866,6 @@ namespace ReplayLogger
                 : $"HitWarn|+{unixTime - lastUnixTime}|{prev}->{current}|{sign}{delta} mask(s)";
 
             LogWrite.EncryptedLine(writer, entry);
-            writer.Flush();
 
             string arena = string.IsNullOrEmpty(arenaName) ? "UnknownArena" : arenaName;
             string warnEntry = $"|{arena}|+{unixTime - lastUnixTime}|{prev}->{current}|{sign}{delta} mask(s)";
@@ -893,7 +881,6 @@ namespace ReplayLogger
                 : $"HitWarn|Lifeblood|+{unixTime - lastUnixTime}|{prev}->{current}|{sign}{delta} lifeblood";
 
             LogWrite.EncryptedLine(writer, entry);
-            writer.Flush();
 
             string arena = string.IsNullOrEmpty(arenaName) ? "UnknownArena" : arenaName;
             string warnEntry = $"|{arena}|+{unixTime - lastUnixTime}|Lifeblood {prev}->{current}|{sign}{delta}";

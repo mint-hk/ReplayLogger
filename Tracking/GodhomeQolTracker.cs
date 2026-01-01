@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -10,6 +11,8 @@ namespace ReplayLogger
         private readonly DreamshieldSettingsTracker dreamshieldSettings = new();
         private readonly CarefreeMelodyResetTracker carefreeMelodyReset = new();
         private readonly BossChallengeSettingsTracker bossChallengeSettings = new();
+        private long lastUpdateTime;
+        private const int UpdateThrottleMs = 1000;
 
         public void Reset()
         {
@@ -18,6 +21,7 @@ namespace ReplayLogger
             dreamshieldSettings.Reset();
             carefreeMelodyReset.Reset();
             bossChallengeSettings.Reset();
+            lastUpdateTime = 0;
         }
 
         public void StartFight(string arenaName, long baseUnixTime)
@@ -27,10 +31,18 @@ namespace ReplayLogger
             dreamshieldSettings.StartFight(arenaName, baseUnixTime);
             carefreeMelodyReset.StartFight(arenaName, baseUnixTime);
             bossChallengeSettings.StartFight(arenaName, baseUnixTime);
+            lastUpdateTime = 0;
         }
 
         public void Update(string arenaName)
         {
+            long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            if (lastUpdateTime > 0 && now - lastUpdateTime < UpdateThrottleMs)
+            {
+                return;
+            }
+
+            lastUpdateTime = now;
             collectorPhases.Update(arenaName);
             fastSuperDash.Update(arenaName);
             dreamshieldSettings.Update(arenaName);

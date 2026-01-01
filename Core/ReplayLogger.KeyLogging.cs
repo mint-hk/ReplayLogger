@@ -51,8 +51,7 @@ namespace ReplayLogger
                     string logEntry = $"+{unixTime - lastUnixTime}|{formattedKey}|{keyStatus}|{watermarkNumber}|#{watermarkColor}|{fps.ToString("F0")}|";
                     try
                     {
-                        LogWrite.EncryptedLine(writer, logEntry);
-                        writer?.Flush();
+                        keyLogBuffer.Add(logEntry);
                     }
                     catch (Exception e)
                     {
@@ -66,6 +65,8 @@ namespace ReplayLogger
                     }
                 }
             }
+
+            FlushKeyLogBufferIfNeeded(DateTimeOffset.Now.ToUnixTimeMilliseconds());
         }
 
         private void FlushWarningsIfNeeded(BufferedLogSection buffer, IReadOnlyList<string> warnings, Action clearAction)
@@ -82,6 +83,30 @@ namespace ReplayLogger
 
             buffer.AddRange(warnings);
             clearAction?.Invoke();
+        }
+
+        private void FlushKeyLogBufferIfNeeded(long now, bool force = false)
+        {
+            if (writer == null || keyLogBuffer.Count == 0)
+            {
+                return;
+            }
+
+            if (!force)
+            {
+                if (now - lastKeyLogFlushTime < KeyLogFlushIntervalMs && keyLogBuffer.Count < KeyLogFlushBatchSize)
+                {
+                    return;
+                }
+            }
+
+            foreach (string entry in keyLogBuffer)
+            {
+                LogWrite.EncryptedLine(writer, entry);
+            }
+
+            keyLogBuffer.Clear();
+            lastKeyLogFlushTime = now;
         }
     }
 }
