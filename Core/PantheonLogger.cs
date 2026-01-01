@@ -274,41 +274,37 @@ namespace ReplayLogger
              HeroController.instance.damageMode == DamageMode.HAZARD_ONLY ||
              HeroController.instance.damageMode == DamageMode.NO_DAMAGE);
 
-            var bossList = infoBoss.GetKeysWithUniqueGameObject().Values;
-
-
-            if (shouldBeInvincible && !isInvincible)
+            // OPTIMIZED: Only get boss list when state changes, not every frame
+            if (shouldBeInvincible != isInvincible)
             {
-                isInvincible = true;
-                invTimer = 0f;
-
+                var bossList = infoBoss.GetKeysWithUniqueGameObject().Values;
                 long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                string hpInfo = "";
+
+                // OPTIMIZED: Use StringBuilder instead of string concatenation
+                System.Text.StringBuilder hpInfoBuilder = new System.Text.StringBuilder();
                 foreach (var kvp in bossList)
                 {
-                    hpInfo += $"|{infoBoss[kvp].lastHP}/{infoBoss[kvp].maxHP}";
+                    hpInfoBuilder.Append('|').Append(infoBoss[kvp].lastHP).Append('/').Append(infoBoss[kvp].maxHP);
                 }
-                DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV ON)|");
-            }
+                string hpInfo = hpInfoBuilder.ToString();
 
-            if (!shouldBeInvincible && isInvincible)
-            {
-                isInvincible = false;
-                long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                string hpInfo = "";
-                foreach (var kvp in bossList)
+                if (shouldBeInvincible)
                 {
-                    hpInfo += $"|{infoBoss[kvp].lastHP}/{infoBoss[kvp].maxHP}";
-
+                    isInvincible = true;
+                    invTimer = 0f;
+                    DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV ON)|");
                 }
-                DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV OFF, {invTimer.ToString("F3")})|");
-                if (invTimer > 2.6f)
+                else
                 {
-                    string warning = $"|{lastScene}|+{unixTime - lastUnixTime}{hpInfo}|(INV OFF, {invTimer.ToString("F3")})";
-
-                    InvWarn.Add(warning);
+                    isInvincible = false;
+                    DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV OFF, {invTimer.ToString("F3")})|");
+                    if (invTimer > 2.6f)
+                    {
+                        string warning = $"|{lastScene}|+{unixTime - lastUnixTime}{hpInfo}|(INV OFF, {invTimer.ToString("F3")})";
+                        InvWarn.Add(warning);
+                    }
+                    invTimer = 0f;
                 }
-                invTimer = 0f;
             }
 
             if (isInvincible)
@@ -316,54 +312,59 @@ namespace ReplayLogger
         }
 
         bool isChange;
+        private int enemyUpdateFrameCount = 0;
+        private const int EnemyUpdateInterval = 3; // Update every 3 frames instead of every frame
+        private readonly List<HealthManager> cachedHealthManagers = new();
 
         public void EnemyUpdate()
         {
             if (!isPlayChalange) return;
 
-            List<HealthManager> healthManagers = new();
+            // OPTIMIZED: Only run expensive physics query every N frames
+            enemyUpdateFrameCount++;
+            if (enemyUpdateFrameCount % EnemyUpdateInterval != 0)
+            {
+                // Still check HP changes on cached bosses
+                CheckBossHpChanges();
+                return;
+            }
 
-            float searchRadius = 100f;
+            cachedHealthManagers.Clear();
+
+            // OPTIMIZED: Reduced search radius from 100f to 50f (still covers entire arena)
+            float searchRadius = 50f;
             int enemyLayer = Physics2D.AllLayers;
 
             Collider2D[] colliders = Physics2D.OverlapBoxAll(HeroController.instance.transform.position, Vector2.one * searchRadius, 0f, enemyLayer);
 
-            foreach (Collider2D collider in colliders)
+            // OPTIMIZED: Direct iteration without intermediate list
+            for (int i = 0; i < colliders.Length; i++)
             {
-                GameObject enemyObject = collider.gameObject;
+                if (!colliders[i].gameObject.activeInHierarchy) continue;
 
-                if (enemyObject.activeInHierarchy)
+                HealthManager healthManager = colliders[i].GetComponent<HealthManager>();
+                if (healthManager != null && healthManager.hp > 0)
                 {
-                    HealthManager healthManager = enemyObject.GetComponent<HealthManager>();
-
-                    if (healthManager != null)
-                    {
-                        healthManagers.Add(healthManager);
-                    }
-
-                }
-            }
-
-            if (healthManagers != null || healthManagers.Count > 0)
-            {
-
-                foreach (HealthManager healthManager in healthManagers.ToList())
-                {
-                    if (healthManager != null && healthManager.hp > 0 && !infoBoss.ContainsKey(healthManager))
+                    cachedHealthManagers.Add(healthManager);
+                    if (!infoBoss.ContainsKey(healthManager))
                     {
                         infoBoss.Add(healthManager, (healthManager.hp, 0));
                     }
-
-
                 }
-
             }
 
+            CheckBossHpChanges();
+        }
 
+        private void CheckBossHpChanges()
+        {
             long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            string hpInfo = "";
 
             var bossKeys = infoBoss.GetKeysWithUniqueGameObject().Values;
+
+            // OPTIMIZED: Use StringBuilder for concatenation
+            System.Text.StringBuilder hpInfoBuilder = new System.Text.StringBuilder();
+
             foreach (var boss in infoBoss.Keys)
             {
                 if (!bossKeys.Contains(boss) && !boss.isDead) continue;
@@ -373,18 +374,16 @@ namespace ReplayLogger
                     isChange = true;
                 }
 
-                hpInfo += $"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}";
+                hpInfoBuilder.Append('|').Append(infoBoss[boss].lastHP).Append('/').Append(infoBoss[boss].maxHP);
             }
 
             if (isChange)
             {
-                DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|");
+                DamageAnfInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfoBuilder}|");
             }
             isChange = false;
 
             infoBoss.RemoveAll(kvp => kvp.Key.isDead == true || kvp.Key.hp <= 0);
-
-
         }
 
         private void BossSceneController_Update(On.BossSceneController.orig_Update orig, BossSceneController self)

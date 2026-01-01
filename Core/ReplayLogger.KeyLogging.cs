@@ -9,6 +9,25 @@ namespace ReplayLogger
     public partial class ReplayLogger
     {
         private static readonly KeyCode[] CachedKeyCodes = (KeyCode[])Enum.GetValues(typeof(KeyCode));
+        private static readonly KeyCode[] RelevantKeyCodes = GenerateRelevantKeyCodes();
+
+        private static KeyCode[] GenerateRelevantKeyCodes()
+        {
+            var list = new System.Collections.Generic.List<KeyCode>();
+            for (int i = (int)KeyCode.A; i <= (int)KeyCode.Z; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.Alpha0; i <= (int)KeyCode.Alpha9; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.Keypad0; i <= (int)KeyCode.Keypad9; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.F1; i <= (int)KeyCode.F15; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.JoystickButton0; i <= (int)KeyCode.JoystickButton19; i++) list.Add((KeyCode)i);
+
+            list.AddRange(new[] {
+                KeyCode.Space, KeyCode.Return, KeyCode.Escape, KeyCode.Backspace, KeyCode.Tab,
+                KeyCode.LeftShift, KeyCode.RightShift, KeyCode.LeftControl, KeyCode.RightControl,
+                KeyCode.LeftAlt, KeyCode.RightAlt, KeyCode.LeftArrow, KeyCode.RightArrow,
+                KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2
+            });
+            return list.ToArray();
+        }
 
         private void CheckPressedKey(On.GameManager.orig_Update orig, GameManager self)
         {
@@ -34,7 +53,15 @@ namespace ReplayLogger
             DateTimeOffset dateTimeOffset = DateTimeOffset.FromUnixTimeMilliseconds(unixTime - startUnixTime);
             customCanvas?.UpdateTime(dateTimeOffset.ToString("HH:mm:ss"));
 
-            foreach (KeyCode keyCode in CachedKeyCodes)
+            // OPTIMIZED: Early exit if no input detected - saves ~21,000 checks per second at 60fps
+            if (!Input.anyKeyDown && !Input.GetMouseButtonDown(0) && !Input.GetMouseButtonDown(1) && !Input.GetMouseButtonDown(2))
+            {
+                FlushKeyLogBufferIfNeeded(unixTime);
+                return;
+            }
+
+            // Only check relevant keys (~100 instead of 350)
+            foreach (KeyCode keyCode in RelevantKeyCodes)
             {
                 if (Input.GetKeyDown(keyCode) || Input.GetKeyUp(keyCode))
                 {

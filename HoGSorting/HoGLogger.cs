@@ -97,6 +97,10 @@ namespace ReplayLogger
         private static bool isInvincible;
         private static bool isChange;
         private static float invTimer;
+        private static int enemyUpdateFrameCount = 0;
+        private const int EnemyUpdateInterval = 3; // Update every 3 frames instead of every frame
+        private static readonly List<HKHealthManager> cachedHealthManagers = new();
+
         [ModuleInitializer]
         internal static void InitializeModule()
         {
@@ -160,6 +164,27 @@ namespace ReplayLogger
             }
         }
 
+        private static readonly KeyCode[] CachedKeyCodes = (KeyCode[])Enum.GetValues(typeof(KeyCode));
+        private static readonly KeyCode[] RelevantKeyCodes = GenerateRelevantKeyCodes();
+
+        private static KeyCode[] GenerateRelevantKeyCodes()
+        {
+            var list = new System.Collections.Generic.List<KeyCode>();
+            for (int i = (int)KeyCode.A; i <= (int)KeyCode.Z; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.Alpha0; i <= (int)KeyCode.Alpha9; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.Keypad0; i <= (int)KeyCode.Keypad9; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.F1; i <= (int)KeyCode.F15; i++) list.Add((KeyCode)i);
+            for (int i = (int)KeyCode.JoystickButton0; i <= (int)KeyCode.JoystickButton19; i++) list.Add((KeyCode)i);
+
+            list.AddRange(new[] {
+                KeyCode.Space, KeyCode.Return, KeyCode.Escape, KeyCode.Backspace, KeyCode.Tab,
+                KeyCode.LeftShift, KeyCode.RightShift, KeyCode.LeftControl, KeyCode.RightControl,
+                KeyCode.LeftAlt, KeyCode.RightAlt, KeyCode.LeftArrow, KeyCode.RightArrow,
+                KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2
+            });
+            return list.ToArray();
+        }
+
         private static void GameManager_Update(On.GameManager.orig_Update orig, GameManager self)
         {
             orig(self);
@@ -174,10 +199,19 @@ namespace ReplayLogger
             debugMenuTracker.Update(writer, activeArena, lastUnixTime);
             godhomeQolTracker.Update(activeArena);
 
-            DateTimeOffset relative = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.Now.ToUnixTimeMilliseconds() - startUnixTime);
+            long now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            DateTimeOffset relative = DateTimeOffset.FromUnixTimeMilliseconds(now - startUnixTime);
             customCanvas?.UpdateTime(relative.ToString("HH:mm:ss"));
 
-            foreach (KeyCode keyCode in Enum.GetValues(typeof(KeyCode)))
+            // OPTIMIZED: Early exit if no input detected - saves ~21,000 checks per second at 60fps
+            if (!Input.anyKeyDown && !Input.GetMouseButtonDown(0) && !Input.GetMouseButtonDown(1) && !Input.GetMouseButtonDown(2))
+            {
+                FlushKeyLogBufferIfNeeded(now);
+                return;
+            }
+
+            // Only check relevant keys (~100 instead of 350)
+            foreach (KeyCode keyCode in RelevantKeyCodes)
             {
                 if (!Input.GetKeyDown(keyCode) && !Input.GetKeyUp(keyCode))
                 {
@@ -240,7 +274,7 @@ namespace ReplayLogger
                 }
             }
 
-            FlushKeyLogBufferIfNeeded(DateTimeOffset.Now.ToUnixTimeMilliseconds());
+            FlushKeyLogBufferIfNeeded(now);
         }
 
         private static void BossSceneController_Update(On.BossSceneController.orig_Update orig, BossSceneController self)
@@ -1329,23 +1363,26 @@ namespace ReplayLogger
                 invTimer = 0f;
 
                 long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                string hpInfo = "";
+                // OPTIMIZED: Use StringBuilder instead of string concatenation
+                StringBuilder hpInfoBuilder = new StringBuilder();
                 foreach (var boss in bossList)
                 {
-                    hpInfo += $"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}";
+                    hpInfoBuilder.Append($"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}");
                 }
-                damageAndInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV ON)|");
+                damageAndInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfoBuilder}|(INV ON)|");
             }
 
             if (!shouldBeInvincible && isInvincible)
             {
                 isInvincible = false;
                 long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-                string hpInfo = "";
+                // OPTIMIZED: Use StringBuilder instead of string concatenation
+                StringBuilder hpInfoBuilder = new StringBuilder();
                 foreach (var boss in bossList)
                 {
-                    hpInfo += $"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}";
+                    hpInfoBuilder.Append($"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}");
                 }
+                string hpInfo = hpInfoBuilder.ToString();
                 damageAndInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|(INV OFF, {invTimer.ToString("F3", CultureInfo.InvariantCulture)})|");
                 if (invTimer > 2.6f)
                 {
@@ -1362,38 +1399,54 @@ namespace ReplayLogger
 
         private static void EnemyUpdate()
         {
-            List<HKHealthManager> healthManagers = new();
-            float searchRadius = 100f;
+            // OPTIMIZED: Only run expensive physics query every N frames
+            enemyUpdateFrameCount++;
+            if (enemyUpdateFrameCount % EnemyUpdateInterval != 0)
+            {
+                // Still check HP changes on cached bosses
+                CheckBossHpChanges();
+                return;
+            }
+
+            cachedHealthManagers.Clear();
+
+            // OPTIMIZED: Reduced search radius from 100f to 50f
+            float searchRadius = 50f;
             int enemyLayer = Physics2D.AllLayers;
 
             Collider2D[] colliders = Physics2D.OverlapBoxAll(HeroController.instance.transform.position, Vector2.one * searchRadius, 0f, enemyLayer);
-            foreach (Collider2D collider in colliders)
+
+            // OPTIMIZED: Direct iteration without intermediate list
+            for (int i = 0; i < colliders.Length; i++)
             {
-                GameObject enemyObject = collider.gameObject;
-                if (enemyObject.activeInHierarchy)
+                if (!colliders[i].gameObject.activeInHierarchy)
                 {
-                    HKHealthManager enemyHealthManager = enemyObject.GetComponent<HKHealthManager>();
-                    if (enemyHealthManager != null)
+                    continue;
+                }
+
+                HKHealthManager enemyHealthManager = colliders[i].GetComponent<HKHealthManager>();
+                if (enemyHealthManager != null && enemyHealthManager.hp > 0)
+                {
+                    cachedHealthManagers.Add(enemyHealthManager);
+                    if (!infoBoss.ContainsKey(enemyHealthManager))
                     {
-                        healthManagers.Add(enemyHealthManager);
+                        infoBoss.Add(enemyHealthManager, (enemyHealthManager.hp, 0));
                     }
                 }
             }
 
-            foreach (HKHealthManager enemyHealthManager in healthManagers.ToList())
-            {
-                if (enemyHealthManager != null && enemyHealthManager.hp > 0 && !infoBoss.ContainsKey(enemyHealthManager))
-                {
-                    infoBoss.Add(enemyHealthManager, (enemyHealthManager.hp, 0));
-                }
+            CheckBossHpChanges();
+        }
 
-            }
-
+        private static void CheckBossHpChanges()
+        {
             long unixTime = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-            string hpInfo = "";
+            // OPTIMIZED: Use StringBuilder instead of string concatenation
+            StringBuilder hpInfoBuilder = new StringBuilder();
 
             var bossKeys = infoBoss.GetKeysWithUniqueGameObject().Values;
-            foreach (var boss in infoBoss.Keys.ToList())
+            // OPTIMIZED: Direct iteration without .ToList()
+            foreach (var boss in infoBoss.Keys)
             {
                 if (!bossKeys.Contains(boss) && !boss.isDead)
                 {
@@ -1406,12 +1459,12 @@ namespace ReplayLogger
                     isChange = true;
                 }
 
-                hpInfo += $"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}";
+                hpInfoBuilder.Append($"|{infoBoss[boss].lastHP}/{infoBoss[boss].maxHP}");
             }
 
             if (isChange)
             {
-                damageAndInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfo}|");
+                damageAndInv.Add($"\u00A0+{unixTime - lastUnixTime}{hpInfoBuilder}|");
             }
             isChange = false;
 
